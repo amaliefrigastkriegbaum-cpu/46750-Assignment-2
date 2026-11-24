@@ -22,9 +22,7 @@ from pathlib import Path
 
 from src.data_loader import load_community, list_communities
 from src.model import CommunityModel, ContractMode, DynamicPricingCommunityModel, internal_price_of_C
-from src.plotting import plot_member_benefits, plot_results
 from src import analysis_q1 as q1
-from src.plotting import plot_gain_map, plot_member_benefits, plot_member_gains, plot_results
 from src.plotting import (plot_dp_benefits_by_member, plot_dp_cap_sweep, plot_dp_compare_prices,
                           plot_dp_cost_of_requirements, plot_dp_prices, plot_dp_shift_heatmap, plot_member_benefits,
                           plot_results)
@@ -76,8 +74,6 @@ def main() -> None:
     ap.add_argument("--betas", type=float, nargs="*", default=[0.0, 0.25, 0.5, 0.75, 1.0], help="discounts of the sweep")
     ap.add_argument("--phis", type=float, nargs="*", default=[0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.6, 2.0],
                     help="cap factors of the sweep (1.3 = base case)")
-    ap.add_argument("--battery-end-value", type=float, default=0.0,
-                    help="economic value in DKK/kWh of battery energy at the end of the day")
     ap.add_argument("--DP", action="store_true", help="run DP and compare it with C")
     ap.add_argument("--sos1", action="store_true", help="DP: SOS1 instead of big-M")
     ap.add_argument("--reg", type=float, default=1e-3, help="DP: weight of the price regularization towards C's duals")
