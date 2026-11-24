@@ -352,6 +352,7 @@ def plot_member_gains(members, output_dir: Path | str) -> Path:
     fig.tight_layout()
     path = output_dir / "q1_member_gains.png"
     fig.savefig(path, dpi=170)
+
 def plot_dp_benefits_by_member(tables: dict, benchmark: str, output_dir: Path | str, tag: str = "dynamic_q2") -> Path:
     """Each member's benefit against its benchmark (> 0 = better off), one bar per model, members grouped by assets.
     Bars below zero: individual rationality is violated (the blocking members)."""
@@ -386,7 +387,6 @@ def plot_dp_benefits_by_member(tables: dict, benchmark: str, output_dir: Path | 
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
-
 
 def plot_dp_cap_sweep(sweep, output_dir: Path | str, tag: str = "dynamic_q2") -> Path:
     """Sensitivity on the cap tightness f'. Top: cost of each step against C. Bottom: the rent DP collects and the
@@ -469,3 +469,78 @@ def plot_dp_shift_heatmap(shifts: dict, assets: dict, cap, imports: dict, output
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
+
+"""Plots for the hourly results of the three contract modes."""
+
+
+def _zero_crossing(x, y):
+    """x where y first changes sign (linear interpolation), or None."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    for k in range(len(x) - 1):
+        if y[k] * y[k + 1] < 0:
+            return float(x[k] - y[k] * (x[k + 1] - x[k]) / (y[k + 1] - y[k]))
+    return None
+
+def plot_gain_map(grid, output_dir: Path | str, base: tuple[float, float] = (0.75, 1.3)) -> Path:
+    """Figure 1: community gain (DKK/day) of I and C relative to R over the discount beta^DSO and the cap factor phi.
+
+    Same diverging colour scale in both panels, centred on zero (green = the contract is cheaper than R). The black
+    contour is the break-even (gain = 0) and the framed cell is the base case (beta, phi) = base.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    limit = float(max(np.abs(grid["gain_I_vs_R"]).max(), np.abs(grid["gain_C_vs_R"]).max()))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
+    for ax, column, title in zip(axes, ("gain_I_vs_R", "gain_C_vs_R"), ("I vs R", "C vs R")):
+        table = grid.pivot(index="beta", columns="phi", values=column).sort_index(ascending=False)
+        image = ax.imshow(table.values, cmap="RdYlGn", vmin=-limit, vmax=limit, aspect="auto")
+        ax.set_xticks(range(len(table.columns)), [f"{x:g}" for x in table.columns])
+        ax.set_yticks(range(len(table.index)), [f"{x:g}" for x in table.index])
+        ax.set(title=f"{title}: community gain (DKK/day)", xlabel="cap factor $\\phi$", ylabel="$\\beta^{DSO}$")
+        for (row, col), value in np.ndenumerate(table.values):
+            ax.text(col, row, f"{value:.1f}", ha="center", va="center", fontsize=8)
+        if table.values.min() < 0 < table.values.max():
+            ax.contour(table.values, levels=[0.0], colors="black", linewidths=1.6)
+        betas, phis = list(table.index), list(table.columns)
+        if base[0] in betas and base[1] in phis:
+            ax.add_patch(plt.Rectangle((phis.index(base[1]) - 0.5, betas.index(base[0]) - 0.5), 1, 1, fill=False,
+                                       edgecolor="black", linewidth=2.8))
+        fig.colorbar(image, ax=ax)
+    fig.tight_layout()
+    path = output_dir / "q1_gain_map.png"
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
+
+
+def plot_dso_view(grid, output_dir: Path | str, beta: float = 0.75, base_phi: float = 1.3) -> Path:
+    """Revenue the DSO gives up per kWh of exceedance removed (DKK/kWh), I and C vs R, over the cap factor phi."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    g = grid[np.isclose(grid["beta"], beta)].sort_values("phi")
+    phi = g["phi"].to_numpy()
+    colors = {"I": "tab:orange", "C": "tab:blue"}
+    fig, ax = plt.subplots(figsize=(6.2, 3.9))
+    for key in ("I", "C"):
+        removed = g["exc_R"].to_numpy() - g[f"exc_{key}"].to_numpy()
+        d_rev = g[f"rev_{key}"].to_numpy() - g["rev_R"].to_numpy()
+        ok = removed > 1.0
+        per_kwh = np.where(ok, -d_rev / np.where(ok, removed, 1.0), np.nan)
+        ax.plot(phi, per_kwh, marker="o", color=colors[key], label=key)
+        cross = _zero_crossing(phi, g[f"gain_{key}_vs_R"].to_numpy())
+        if cross is not None:
+            ax.axvline(cross, color=colors[key], linestyle=":", linewidth=1.4)
+            ax.annotate(f"{key} breaks even\n$\\phi\\approx{cross:.2f}$", (cross, 0), xytext=(4, 12 if key == "C" else 36),
+                        textcoords="offset points", fontsize=8, color=colors[key])
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.axvline(base_phi, color="gray", linestyle="--", linewidth=1.0)
+    ax.set(xlabel="cap factor $\\phi$", ylabel="DKK per kWh removed",
+           title="Revenue the DSO gives up per kWh of exceedance removed")
+    ax.grid(alpha=0.25)
+    ax.legend(title=f"vs R, $\\beta^{{DSO}}={beta:g}$", fontsize=8)
+    fig.tight_layout()
+    path = output_dir / "q1_dso_view.png"
+    fig.savefig(path, dpi=170)
+    plt.close(fig)
+    return path
+

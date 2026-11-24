@@ -49,6 +49,7 @@ def dso_metrics(imp: np.ndarray, imp_ref: np.ndarray, cap: np.ndarray) -> dict:
     """The DSO's view: aggregated import (kW) against the cap profile (kW); imp_ref is the import of R."""
     exc = np.maximum(imp - cap, 0.0)
     return {"peak_import_kW": float(imp.max()),
+            "total_daily_import_kWh": float(imp.sum()),
             "peak_reduction_pct": float(100 * (imp_ref.max() - imp.max()) / imp_ref.max()),
             "hours_above_cap": int((exc > TOL).sum()),
             "total_exceedance_kWh": float(exc.sum()),
@@ -97,22 +98,35 @@ def base_comparison(com, end_value: float):
 
 # --------------------------------------------------------------------------- Sweep of the contract parameters beta^DSO and phi^DSO
 def contract_sweep(com, end_value: float, betas, phis) -> pd.DataFrame:
-    """Community gains of I and C over the discount beta^DSO and the cap factor phi (alpha^DSO fixed).
+    """Gains and the DSO's view of I and C over the discount beta^DSO and the cap factor phi (alpha^DSO fixed).
 
-    phi defines the cap as phi x (daily import of R) / 24; the base case has phi = 1.3. R does not depend on the contract terms.
+    phi defines the cap as phi x (daily import of R) / 24; the base case has phi = 1.3. R does not depend on the contract terms,
+    but its exceedance is measured against the cap of each phi. Exceedance is on the aggregated import (kWh/day), revenue is
+    tariffs plus penalties (DKK/day), nu_max_C is the largest shadow price of the cap in C (DKK/kWh).
     """
     base_phi = com.contract.capacity_limit_daily_energy_factor
-    J_R = solve(com, ContractMode.NONE, end_value)[1].objective
+    mR, rR = solve(com, ContractMode.NONE, end_value)
+    J_R, imp_R, rev_R = rR.objective, rR.hourly["import"].to_numpy(), dso_revenue(mR, com, ContractMode.NONE)
     rows = []
     for b in betas:
         for phi in phis:
             c = with_contract(com, beta=b, cap_scale=phi / base_phi)
-            J_I = solve(c, ContractMode.INDIVIDUAL, end_value)[1].objective
-            J_C = solve(c, ContractMode.COMMUNITY, end_value)[1].objective
-            rows.append({"beta": b, "phi": phi, "gain_I_vs_R": J_R - J_I, "gain_C_vs_R": J_R - J_C,
-                         "pooling_value_C_vs_I": J_I - J_C})
+            cap = np.asarray(c.contract.capacity_limit_kW)
+            alpha_p = c.contract.penalty_DKK_per_kWh + c.contract.tariff_discount_ratio * c.members[0].import_tariff
+            mI, rI = solve(c, ContractMode.INDIVIDUAL, end_value)
+            mC, rC = solve(c, ContractMode.COMMUNITY, end_value)
+            exc = lambda r: float(np.maximum(r.hourly["import"].to_numpy() - cap, 0.0).sum())
+            rows.append({"beta": b, "phi": phi, "gain_I_vs_R": J_R - rI.objective, "gain_C_vs_R": J_R - rC.objective,
+                         "pooling_value_C_vs_I": rI.objective - rC.objective,
+                         "exc_R": float(np.maximum(imp_R - cap, 0.0).sum()), "exc_I": exc(rI), "exc_C": exc(rC),
+                         "rev_R": rev_R, "rev_I": dso_revenue(mI, c, ContractMode.INDIVIDUAL),
+                         "rev_C": dso_revenue(mC, c, ContractMode.COMMUNITY),
+                         "nu_max_C": float(max(mC.con["excess"][t].Pi for t in mC.T)),
+                         # I: ≤-bibetingelse i et minimeringsproblem => dual er ≤ 0, så skiftes fortegn
+                         "nu_max_I": float(max(-c_.Pi for c_ in mI.con["excess"].values())),
+                         "nI_at_alpha": int(sum(1 for c_ in mI.con["excess"].values() if -c_.Pi > alpha_p - 1e-6)),
+                         })
     return pd.DataFrame(rows)
-
 
 # --------------------------------------------------------------------------- Settlement of C
 def own_costs(mdl, end_value: float) -> dict[str, float]:

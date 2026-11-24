@@ -25,8 +25,7 @@ from src.model import CommunityModel, ContractMode, DynamicPricingCommunityModel
 from src import analysis_q1 as q1
 from src.plotting import (plot_dp_benefits_by_member, plot_dp_cap_sweep, plot_dp_compare_prices,
                           plot_dp_cost_of_requirements, plot_dp_prices, plot_dp_shift_heatmap, plot_member_benefits,
-                          plot_results)
-
+                          plot_results, plot_gain_map, plot_member_gains, plot_dso_view)
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 def run_q1_base(com, end_value: float, out: Path) -> None:
@@ -43,6 +42,7 @@ def run_q1_sweep(com, end_value: float, out: Path, betas, phis) -> None:
     grid.to_csv(out / "q1_sweep_beta_cap.csv", index=False)
     print("\nSmallest value of pooling G_C,I over the grid:", round(grid["pooling_value_C_vs_I"].min(), 2), "DKK")
     print(f"  {plot_gain_map(grid, out)}")
+    print("DSO view:", plot_dso_view(grid, out / "sweep"))
 
 
 def run_q1_settlement(com, end_value: float, out: Path) -> None:
@@ -67,6 +67,8 @@ def main() -> None:
     ap.add_argument("--I", action="store_true", help="run the 16-member individual-contract case")
     ap.add_argument("--C", action="store_true", help="run the centralized-dispatch community-contract case")
     ap.add_argument("--battery-end-value", type=float, default=0.0, help="economic value in DKK/kWh of battery energy at the end of the day")
+    ap.add_argument("--final-soc", choices=("initial", "free"), default="initial",
+                    help="battery end-of-day state of charge: equal to the initial state (as in the reference of the contract file) or free")
     ap.add_argument("--q1", action="store_true", help="Question 1: run --q1-base, --q1-sweep and --q1-settlement")
     ap.add_argument("--q1-base", action="store_true", help="Section 1.4: Table 3 and the gains of R, I and C")
     ap.add_argument("--q1-sweep", action="store_true", help="Section 1.5: gain over beta and cap factor (Figure 1)")
@@ -92,6 +94,10 @@ def main() -> None:
     args = ap.parse_args()
 
     com = load_community(args.community, day=args.day)
+    if args.final_soc == "initial":
+        for m in com.members:
+            if m.has_battery:
+                m.battery_final_soc_kWh = m.battery_initial_soc_kWh
     print(com.summary(), "\n")
     if args.members:
         for m in com.members:
